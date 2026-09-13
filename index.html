@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Nathan â€” Systems Architecture & Clinical Nutrition (BINUS Malang)</title>
+    <title>Nathan — Systems Architecture & Clinical Nutrition (BINUS Malang)</title>
     <meta name="description" content="Portfolio of Nathanael Gevura (BINUS University Malang). Dual-track systems engineering and clinical health sciences. Offline-first POS, heuristic school meal routing, and foliar pathology AI.">
     
     <!-- Google Fonts: Archivo (Technical Grotesk) & Lora (Editorial Serif) -->
@@ -12,17 +12,240 @@
     <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap" rel="stylesheet">
 
     <!-- Styles & Scripts via Vite -->
-    <link rel="preload" as="style" href="/build/assets/app-C93zzwdy.css" />
-    <link rel="modulepreload" as="script" href="/build/assets/app-B9d9ToLy.js" />
-    <link rel="stylesheet" href="/build/assets/app-C93zzwdy.css" />
-    <script type="module" src="/build/assets/app-B9d9ToLy.js"></script>
+    <link rel="preload" as="style" href="/build/assets/app-C93zzwdy.css" /><link rel="modulepreload" as="script" href="/build/assets/app-B9d9ToLy.js" /><link rel="stylesheet" href="/build/assets/app-C93zzwdy.css" /><script type="module" src="/build/assets/app-B9d9ToLy.js"></script><script id="browser-logger-active">
+(function() {
+    const ENDPOINT = '/_boost/browser-logs';
+    const logQueue = [];
+    let flushTimeout = null;
+    const captureTypes = ["error","warning","info","log","debug","table"];
+
+    console.log('🔍 Browser logger active (MCP server detected). Posting to: ' + ENDPOINT);
+
+    // Store original console methods
+    const originalConsole = {
+        log: console.log,
+        debug: console.debug,
+        info: console.info,
+        error: console.error,
+        warn: console.warn,
+        table: console.table
+    };
+
+    // Walk own enumerable keys so JSON.stringify cannot auto-invoke a proxy fake toJSON (e.g. Livewire's `$wire`) and fire a real request.
+    function toSafeValue(value, seen) {
+        if (value === null || typeof value !== 'object') {
+            return value;
+        }
+        if (value instanceof Error) {
+            return { name: value.name, message: value.message, stack: value.stack };
+        }
+        // Date has no own enumerable keys, so the walk below would collapse it to {}.
+        if (value instanceof Date) {
+            return value.toISOString();
+        }
+        if (seen.has(value)) {
+            return '[Circular]';
+        }
+        seen.add(value);
+        if (Array.isArray(value)) {
+            return value.map((item) => toSafeValue(item, seen));
+        }
+        const plain = {};
+        for (const key of Object.keys(value)) {
+            if (key === 'toJSON') continue;
+            try {
+                plain[key] = toSafeValue(value[key], seen);
+            } catch (e) {
+                plain[key] = '[Unreadable]';
+            }
+        }
+        return plain;
+    }
+
+    // Helper to safely stringify values
+    function safeStringify(obj) {
+        return JSON.stringify(toSafeValue(obj, new WeakSet()));
+    }
+
+    // Normalize log type for consistency (e.g., 'warn' to 'warning')
+    function normalizeType(type) {
+        return type === 'warn' ? 'warning' : type;
+    }
+
+    // Determine if a log type should be captured based on configured levels
+    function shouldCapture(type) {
+        return captureTypes.includes(normalizeType(type));
+    }
+
+    // Batch and send logs
+    function flushLogs() {
+        if (logQueue.length === 0) return;
+
+        const batch = logQueue.splice(0, logQueue.length);
+
+        fetch(ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ logs: batch })
+        }).catch(err => {
+            // Silently fail to avoid infinite loops
+            originalConsole.error('Failed to send logs:', err);
+        });
+    }
+
+    // Debounced flush (100ms)
+    function scheduleFlush() {
+        if (flushTimeout) clearTimeout(flushTimeout);
+        flushTimeout = setTimeout(flushLogs, 100);
+    }
+
+    // Intercept console methods
+    ['log', 'debug', 'info', 'error', 'warn', 'table'].forEach(method => {
+        console[method] = function(...args) {
+            // Call original method
+            originalConsole[method].apply(console, args);
+
+            // Capture log data
+            try {
+                if (!shouldCapture(method)) {
+                    return;
+                }
+
+                logQueue.push({
+                    type: method,
+                    timestamp: new Date().toISOString(),
+                    data: args.map(arg => {
+                        try {
+                            return typeof arg === 'object' ? JSON.parse(safeStringify(arg)) : arg;
+                        } catch (e) {
+                            return String(arg);
+                        }
+                    }),
+                    url: window.location.href,
+                    userAgent: navigator.userAgent
+                });
+
+                scheduleFlush();
+            } catch (e) {
+                // Fail silently
+            }
+        };
+    });
+
+    // Global error handlers for uncaught errors
+    const originalOnError = window.onerror;
+    window.onerror = function boostErrorHandler(errorMsg, url, lineNumber, colNumber, error) {
+        try {
+            if (shouldCapture('error')) {
+                logQueue.push({
+                    type: 'uncaught_error',
+                    timestamp: new Date().toISOString(),
+                    data: [{
+                        message: errorMsg,
+                        filename: url,
+                        lineno: lineNumber,
+                        colno: colNumber,
+                        error: error ? {
+                            name: error.name,
+                            message: error.message,
+                            stack: error.stack
+                        } : null
+                    }],
+                    url: window.location.href,
+                    userAgent: navigator.userAgent
+                });
+
+                scheduleFlush();
+            }
+
+        } catch (e) {
+            // Fail silently
+        }
+
+        // Call original handler if it exists
+        if (originalOnError && typeof originalOnError === 'function') {
+            return originalOnError(errorMsg, url, lineNumber, colNumber, error);
+        }
+
+        // Let the error continue to propagate
+        return false;
+    }
+    window.addEventListener('error', (event) => {
+        try {
+            if (!shouldCapture('error')) {
+                return false;
+            }
+
+            logQueue.push({
+                type: 'window_error',
+                timestamp: new Date().toISOString(),
+                data: [{
+                    message: event.message,
+                    filename: event.filename,
+                    lineno: event.lineno,
+                    colno: event.colno,
+                    error: event.error ? {
+                        name: event.error.name,
+                        message: event.error.message,
+                        stack: event.error.stack
+                    } : null
+                }],
+                url: window.location.href,
+                userAgent: navigator.userAgent
+            });
+
+            scheduleFlush();
+        } catch (e) {
+            // Fail silently
+        }
+
+        // Let the error continue to propagate
+        return false;
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+        try {
+            if (!shouldCapture('error')) {
+                return false;
+            }
+
+            logQueue.push({
+                type: 'error',
+                timestamp: new Date().toISOString(),
+                data: [{
+                    message: 'Unhandled Promise Rejection',
+                    reason: toSafeValue(event.reason, new WeakSet())
+                }],
+                url: window.location.href,
+                userAgent: navigator.userAgent
+            });
+
+            scheduleFlush();
+        } catch (e) {
+            // Fail silently
+        }
+
+        // Let the rejection continue to propagate
+        return false;
+    });
+
+    // Flush on page unload
+    window.addEventListener('beforeunload', () => {
+        if (logQueue.length > 0) {
+            navigator.sendBeacon(ENDPOINT, JSON.stringify({ logs: logQueue }));
+        }
+    });
+})();
+</script>
 </head>
 <body class="bg-[#1B2A4A] text-[#DCE8F5] antialiased selection:bg-[#C98A2E] selection:text-white">
 
     <!-- Fixed 3D Blueprint Background Layer (WebGL, scroll-driven) -->
     <canvas id="scene-3d" aria-hidden="true"></canvas>
 
-    <!-- Hidden SVG Definitions for Cyanotype Duotone Mapping (Â§4) -->
+    <!-- Hidden SVG Definitions for Cyanotype Duotone Mapping (§4) -->
     <svg class="hidden" aria-hidden="true" width="0" height="0">
         <defs>
             <filter id="cyanotype-duotone" color-interpolation-filters="sRGB">
@@ -119,7 +342,7 @@
 
     <!-- Bottom coordinates mark -->
     <div class="text-[9px] font-mono opacity-50 text-center tracking-tighter">
-        7Â°58'S<br>112Â°37'E
+        7°58'S<br>112°37'E
     </div>
 </aside>
 
@@ -141,11 +364,11 @@
         </div>
         <div class="flex items-center gap-6 opacity-75">
             <span>BINUS UNIVERSITY @ MALANG</span>
-            <span>SEMESTER 05 // 2024â€“2025</span>
+            <span>SEMESTER 05 // 2024–2025</span>
         </div>
     </header>
 
-    <!-- Center Hero Stage: 3D Blueprint Scan & Tilted Plane (Â§4) -->
+    <!-- Center Hero Stage: 3D Blueprint Scan & Tilted Plane (§4) -->
     <div class="hero-stage py-10 my-auto">
         <!-- SVG Leader Lines Dynamic Canvas -->
         <svg class="leader-line-svg" aria-hidden="true"></svg>
@@ -180,14 +403,14 @@
             <div class="corner-pin bl"></div>
             <div class="corner-pin br"></div>
 
-            <!-- Single Scan-line Sweep (Â§4 & Â§7) -->
+            <!-- Single Scan-line Sweep (§4 & §7) -->
             <div class="scanline-sweep"></div>
 
             <!-- Portrait Photo with Cyanotype Duotone Filter -->
             <div class="relative overflow-hidden aspect-[3/4] bg-[#1B2A4A] border border-[#DCE8F5]/20">
                 <img 
                     src="/assets/portrait.jpg" 
-                    alt="Nathan â€” Portrait Cyanotype Scan" 
+                    alt="Nathan — Portrait Cyanotype Scan" 
                     class="cyanotype-filter w-full h-full object-cover object-center"
                     loading="eager"
                 >
@@ -205,7 +428,7 @@
         </div>
     </div>
 
-    <!-- Hero Narrative Bottom Block: Nathan â€” one real sentence (Â§3.5) -->
+    <!-- Hero Narrative Bottom Block: Nathan — one real sentence (§3.5) -->
     <div class="max-w-3xl pt-8 border-t border-[#DCE8F5]/20">
         <div class="text-xs font-mono text-[#C98A2E] mb-2 tracking-wide">
             PERSONA IDENTIFIER // DUAL-TRACK FOCUS
@@ -214,7 +437,7 @@
             Nathan
         </h1>
         <p class="text-base sm:text-lg text-[#DCE8F5]/90 font-serif leading-relaxed mb-6">
-            A university student at BINUS Malang operating between software architecture and clinical food systemsâ€”engineering offline-first retail databases, heuristic logistics for national meal programs, and foliar pathology classifiers.
+            A university student at BINUS Malang operating between software architecture and clinical food systems—engineering offline-first retail databases, heuristic logistics for national meal programs, and foliar pathology classifiers.
         </p>
 
         <!-- Quick Jump Links (Direct action labels) -->
@@ -294,7 +517,7 @@
             <div class="flex items-center gap-3 text-xs font-mono text-[#1E2320]">
                 <span class="inline-block w-2.5 h-2.5 bg-[#C98A2E]"></span>
                 <span class="font-bold">SYSTEMS I'VE SHIPPED // 02</span>
-                <span>â€”</span>
+                <span>—</span>
                 <span>PRODUCTION-READY ARCHITECTURE</span>
             </div>
             <div class="text-xs font-mono text-[#1E2320]/70">
@@ -349,7 +572,7 @@
                 <div class="mt-6 pt-4 border-t border-[#1E2320]/20">
                     <a href="https://github.com/nathangev/Toko_SE_Semester4" target="_blank" rel="noopener noreferrer" class="btn-action btn-amber w-full justify-center">
                         <span>View the repo</span>
-                        <span aria-hidden="true">â†—</span>
+                        <span aria-hidden="true">↗</span>
                     </a>
                 </div>
             </div>
@@ -431,7 +654,7 @@
                 <span class="inline-block w-2.5 h-2.5 bg-[#C98A2E]"></span>
                 <span class="inline-block w-2.5 h-2.5 bg-[#6E9C87]"></span>
                 <span class="text-[#DCE8F5] font-bold">CROSS-DISCIPLINARY HYBRID // 03</span>
-                <span class="text-[#DCE8F5]/50">â€”</span>
+                <span class="text-[#DCE8F5]/50">—</span>
                 <span class="text-[#DCE8F5]/80">BLUEPRINT &amp; BENCH OVERLAY</span>
             </div>
             <div class="text-xs font-mono text-[#DCE8F5]/70">
@@ -446,10 +669,10 @@
                     MBG Smart Logistics
                 </h2>
                 <p class="text-base sm:text-lg font-serif text-[#DCE8F5]/90 leading-relaxed mb-6">
-                    Route optimization for Indonesia's national Makan Bergizi Gratis programâ€”dispatching hot, perishable school meals from central kitchens (SPPG) across congested urban corridors.
+                    Route optimization for Indonesia's national Makan Bergizi Gratis program—dispatching hot, perishable school meals from central kitchens (SPPG) across congested urban corridors.
                 </p>
                 <div class="p-4 bg-[#14213B] border-l-3 border-[#6E9C87] border border-[#DCE8F5]/30 text-sm font-serif text-[#DCE8F5] leading-relaxed">
-                    <strong>Where two fields converge:</strong> A standard routing algorithm minimizes kilometers. A food-safety routing algorithm enforces a hard thermal deadline: packed meals lose ~0.14Â°C/minute, requiring drop-offs to finish within 120 minutes before morning recess to guarantee zero foodborne risk.
+                    <strong>Where two fields converge:</strong> A standard routing algorithm minimizes kilometers. A food-safety routing algorithm enforces a hard thermal deadline: packed meals lose ~0.14°C/minute, requiring drop-offs to finish within 120 minutes before morning recess to guarantee zero foodborne risk.
                 </div>
             </div>
 
@@ -478,7 +701,7 @@
                         </li>
                         <li class="flex justify-between border-b border-[#DCE8F5]/10 pb-1.5">
                             <span class="opacity-70">Delivery Deadline</span>
-                            <span class="font-semibold">09:15â€“10:00 WIB (Recess)</span>
+                            <span class="font-semibold">09:15–10:00 WIB (Recess)</span>
                         </li>
                     </ul>
                 </div>
@@ -486,13 +709,13 @@
                 <div class="mt-6 pt-4 border-t border-[#DCE8F5]/20">
                     <a href="https://github.com/nathangev" target="_blank" rel="noopener noreferrer" class="btn-action btn-amber w-full justify-center">
                         <span>View the repository</span>
-                        <span aria-hidden="true">â†—</span>
+                        <span aria-hidden="true">↗</span>
                     </a>
                 </div>
             </div>
         </div>
 
-        <!-- Route & Thermal Map Graphic (Hybrid Blueprint + Bench overlay) -->
+        <!-- Live Application Screenshot (Route Engine UI) -->
         <div class="mb-14 border border-[#DCE8F5]/30 shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
             <div class="p-3 bg-[#14213B] border-b border-[#DCE8F5]/20 flex justify-between items-center text-xs font-mono text-[#DCE8F5]">
                 <span>APLIKASI LANGSUNG // ENGINE RUTE OSRM + AI</span>
@@ -530,7 +753,7 @@
                     Active Heat Threshold Retention
                 </h3>
                 <p class="text-sm font-serif text-[#DCE8F5]/85 leading-relaxed">
-                    Ready-to-eat warm meals packaged in standard insulated crates degrade towards the temperature danger zone (5Â°C to 60Â°C) if transit extends past two hours. The objective function penalizes any route segment where cumulative transit exceeds 110 minutes.
+                    Ready-to-eat warm meals packaged in standard insulated crates degrade towards the temperature danger zone (5°C to 60°C) if transit extends past two hours. The objective function penalizes any route segment where cumulative transit exceeds 110 minutes.
                 </p>
             </div>
         </div>
@@ -548,7 +771,7 @@
                 <span class="inline-block w-2.5 h-2.5 bg-[#6E9C87]"></span>
                 <span class="inline-block w-2.5 h-2.5 bg-[#C98A2E]"></span>
                 <span class="text-[#DCE8F5] font-bold">CROSS-DISCIPLINARY HYBRID // 04</span>
-                <span class="text-[#DCE8F5]/50">â€”</span>
+                <span class="text-[#DCE8F5]/50">—</span>
                 <span class="text-[#DCE8F5]/80">COMPUTER VISION &amp; PATHOLOGY</span>
             </div>
             <div class="text-xs font-mono text-[#DCE8F5]/70">
@@ -563,7 +786,7 @@
                     Computer Vision Leaf Pathology
                 </h2>
                 <p class="text-base sm:text-lg font-serif text-[#DCE8F5]/90 leading-relaxed mb-6">
-                    Automating foliar symptom diagnosis by extracting visual biomarkersâ€”distinguishing between abiotic nutrient deficiencies and acute biotic pathogens on edge hardware.
+                    Automating foliar symptom diagnosis by extracting visual biomarkers—distinguishing between abiotic nutrient deficiencies and acute biotic pathogens on edge hardware.
                 </p>
                 <div class="p-4 bg-[#14213B] border-l-3 border-[#C98A2E] border border-[#DCE8F5]/30 text-sm font-serif text-[#DCE8F5] leading-relaxed">
                     <strong>The diagnostic parallel:</strong> In clinical nutrition, a practitioner identifies physical manifestations of systemic malnutrition (e.g. koilonychia for iron depletion, glossitis for vitamin B complex). This neural model applies that exact diagnostic discipline to plants, parsing chlorosis patterns to diagnose soil chemistry deficits.
@@ -583,7 +806,7 @@
                         </li>
                         <li class="flex justify-between border-b border-[#DCE8F5]/10 pb-1.5">
                             <span class="opacity-70">Input Resolution</span>
-                            <span class="font-semibold">512 Ã— 512 RGB Normalized</span>
+                            <span class="font-semibold">512 × 512 RGB Normalized</span>
                         </li>
                         <li class="flex justify-between border-b border-[#DCE8F5]/10 pb-1.5">
                             <span class="opacity-70">Feature Detection</span>
@@ -603,7 +826,7 @@
                 <div class="mt-6 pt-4 border-t border-[#DCE8F5]/20">
                     <a href="https://github.com/nathangev" target="_blank" rel="noopener noreferrer" class="btn-action btn-sage w-full justify-center">
                         <span>View model weights &amp; notebook</span>
-                        <span aria-hidden="true">â†—</span>
+                        <span aria-hidden="true">↗</span>
                     </a>
                 </div>
             </div>
@@ -664,11 +887,11 @@
             <div class="flex items-center gap-3 text-xs font-mono text-[#1E2320]">
                 <span class="inline-block w-2.5 h-2.5 bg-[#C98A2E]"></span>
                 <span class="font-bold">SYSTEMS I'VE DESIGNED // 05</span>
-                <span>â€”</span>
+                <span>—</span>
                 <span>RELATIONAL MODELING &amp; INTERFACE ARCHITECTURE</span>
             </div>
             <div class="text-xs font-mono text-[#1E2320]/70">
-                COURSE: FINPRO LAB DATABASE â€” BINUS UNIVERSITY
+                COURSE: FINPRO LAB DATABASE — BINUS UNIVERSITY
             </div>
         </div>
 
@@ -715,7 +938,7 @@
                 <div class="mt-6 pt-4 border-t border-[#1E2320]/20">
                     <a href="https://www.figma.com/design/gkB6gDssRcHJO7qVmjgXiZ/FINPRO-LAB-DATABASE-SIMKOST" target="_blank" rel="noopener noreferrer" class="btn-action btn-bench w-full justify-center">
                         <span>Open the Figma design file</span>
-                        <span aria-hidden="true">â†—</span>
+                        <span aria-hidden="true">↗</span>
                     </a>
                 </div>
             </div>
@@ -776,7 +999,7 @@
             <div class="flex items-center gap-3 text-xs font-mono text-[#1E2320]">
                 <span class="inline-block w-2.5 h-2.5 bg-[#6E9C87]"></span>
                 <span class="font-bold">RESEARCH &amp; BIOCHEMISTRY // 06</span>
-                <span>â€”</span>
+                <span>—</span>
                 <span>PEER-REVIEWED ACADEMIC SCHOLARSHIP</span>
             </div>
             <div class="text-xs font-mono text-[#1E2320]/70">
@@ -842,9 +1065,9 @@
 
             <!-- Action Button -->
             <div class="mt-8 pt-4 border-t border-[#1E2320]/15 flex flex-wrap gap-4 items-center">
-                <a href="/assets/paper/mbg-smart-logistics-pkm-proposal.pdf" target="_blank" rel="noopener noreferrer" class="btn-action btn-bench">
+                <a href="#contact" target="_blank" rel="noopener noreferrer" class="btn-action btn-bench">
                     <span>Read the full paper draft</span>
-                    <span aria-hidden="true">â†—</span>
+                    <span aria-hidden="true">↗</span>
                 </a>
                 <span class="text-xs font-mono opacity-60">Opens the full PDF manuscript in a new tab</span>
             </div>
@@ -862,7 +1085,7 @@
             <div class="flex items-center gap-3 text-xs font-mono text-[#1E2320]">
                 <span class="inline-block w-2.5 h-2.5 bg-[#C98A2E]"></span>
                 <span class="font-bold">EDUCATION &amp; ACADEMIC PATH // 07</span>
-                <span>â€”</span>
+                <span>—</span>
                 <span>FORMAL SCHOOLING</span>
             </div>
             <div class="text-xs font-mono text-[#1E2320]/70">
@@ -875,7 +1098,7 @@
                 Education
             </h2>
             <p class="text-base font-serif text-[#1E2320]/90 leading-relaxed">
-                The formal academic track behind the projects and research aboveâ€”from high school in Sidoarjo to an ongoing computer science degree at BINUS University.
+                The formal academic track behind the projects and research above—from high school in Sidoarjo to an ongoing computer science degree at BINUS University.
             </p>
         </div>
 
@@ -885,17 +1108,17 @@
             <!-- BINUS University (current) -->
             <div class="p-6 bg-[#FAF9F6] border border-[#1E2320] flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-6">
                 <div class="text-xs font-mono text-[#C98A2E] font-bold whitespace-nowrap sm:pt-1">
-                    2024 â€” PRESENT
+                    2024 — PRESENT
                 </div>
                 <div>
                     <h3 class="text-lg font-bold text-[#1E2320] mb-1">
                         BINUS University, Malang
                     </h3>
                     <p class="text-sm font-mono text-[#1E2320]/70 mb-3">
-                        Bachelor of Computer Science Â· Expected 2028
+                        Bachelor of Computer Science · Expected 2028
                     </p>
                     <p class="text-sm font-serif text-[#1E2320]/85 leading-relaxed">
-                        Currently pursuing a Computer Science degree, focusing on full-stack development, relational database design, and applied AIâ€”paired with a cross-disciplinary interest in clinical nutrition.
+                        Currently pursuing a Computer Science degree, focusing on full-stack development, relational database design, and applied AI—paired with a cross-disciplinary interest in clinical nutrition.
                     </p>
                 </div>
             </div>
@@ -964,7 +1187,7 @@
                 </div>
                 <a href="https://github.com/nathangev" target="_blank" rel="noopener noreferrer" class="btn-action btn-blueprint text-xs w-full justify-center">
                     <span>View GitHub profile</span>
-                    <span aria-hidden="true">â†—</span>
+                    <span aria-hidden="true">↗</span>
                 </a>
             </div>
 
@@ -977,7 +1200,7 @@
                 </div>
                 <a href="https://linkedin.com/in/nathanael-gevura" target="_blank" rel="noopener noreferrer" class="btn-action btn-blueprint text-xs w-full justify-center">
                     <span>Open LinkedIn profile</span>
-                    <span aria-hidden="true">â†—</span>
+                    <span aria-hidden="true">↗</span>
                 </a>
             </div>
         </div>
@@ -988,7 +1211,7 @@
                 BINUS University @ Malang, Araya Mansion No. 8-22, Malang, East Java
             </div>
             <div>
-                PORTFOLIO SPEC: BLUEPRINT &amp; BENCH // 2024â€“2025
+                PORTFOLIO SPEC: BLUEPRINT &amp; BENCH // 2024–2025
             </div>
         </div>
 
